@@ -183,6 +183,10 @@
       </div>
     </div>
     <div class="nav-section">
+      <div class="nav-label">Account</div>
+      <div id="user-switcher" style="display:flex;flex-direction:column;gap:3px;"></div>
+    </div>
+    <div class="nav-section">
       <div class="nav-label">Overview</div>
       <button class="nav-item active" onclick="nav('dashboard', this)">
         <span class="nav-icon">📊</span> Dashboard
@@ -200,10 +204,7 @@
       </button>
     </div>
     <div class="nav-section" style="margin-top: auto; padding-top: 24px;">
-      <div style="padding: 8px 10px; font-size: 10px; color: var(--text3); font-family: var(--mono);">
-        Jan 2025 – May 2026<br>
-        1 account · 1,013 txns
-      </div>
+      <div id="sidebar-meta" style="padding: 8px 10px; font-size: 10px; color: var(--text3); font-family: var(--mono);"></div>
     </div>
   </aside>
 
@@ -376,22 +377,32 @@ let autoSubs=[{"name": "Natlcarrntlcomox", "freq": "weekly", "avg_amt": 129.73, 
 let remap={}, subMap={}, removedSubs=new Set(), manualSubs=[];
 let activeCat='All', pg=1, filtered=[], openId=null, modalId=null;
 
+// ── MULTI-USER ────────────────────────────────────────────────────────────────
+const USERS={
+  Tim:   {T:null,autoSubs:null},  // populated at init from inline arrays
+  Helen: {T:[],autoSubs:[]},      // placeholder — fill when CSV provided
+  Bill:  {T:[],autoSubs:[]}       // placeholder — fill when CSV provided
+};
+let activeUser='Tim';
+
 // ─── PERSISTENCE ─────────────────────────────────────────────────────────────
-(function loadState(){
-  try {
-    const s=JSON.parse(localStorage.getItem('ff_state')||'{}');
+function loadState(user){
+  remap={}; removedSubs=new Set(); manualSubs=[];
+  try{
+    const s=JSON.parse(localStorage.getItem('ff_state_'+user)||'{}');
     if(s.remap)       remap=s.remap;
     if(s.removedSubs) removedSubs=new Set(s.removedSubs);
     if(s.manualSubs)  manualSubs=s.manualSubs;
-  } catch(e){}
-})();
+  }catch(e){}
+}
 function saveState(){
-  localStorage.setItem('ff_state',JSON.stringify({
+  localStorage.setItem('ff_state_'+activeUser,JSON.stringify({
     remap,
     removedSubs:[...removedSubs],
     manualSubs
   }));
 }
+loadState('Tim');
 
 // Pre-populate subMap from autoSubs
 autoSubs.forEach(s=>{ subMap[s.name]={freq:s.freq,amt:s.avg_amt,cat:s.cat}; });
@@ -847,6 +858,46 @@ function parseSheetCSV(csv){
   return results;
 }
 
+// ── USER SWITCHER ─────────────────────────────────────────────────────────────
+function renderUserSwitcher(){
+  document.getElementById('user-switcher').innerHTML=Object.keys(USERS).map(name=>{
+    const active=name===activeUser;
+    return`<button onclick="switchUser('${name}')" style="display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:7px;border:none;cursor:pointer;text-align:left;width:100%;background:${active?'var(--surface2)':'transparent'};color:var(--text)">
+      <div style="width:22px;height:22px;border-radius:50%;background:${active?'#4f8ef0':'var(--border)'};color:${active?'#fff':'var(--text3)'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">${name[0]}</div>
+      <span style="font-size:13px;font-weight:${active?'600':'400'}">${name}</span>
+    </button>`;
+  }).join('');
+}
+
+function updateSidebarMeta(){
+  const el=document.getElementById('sidebar-meta');
+  if(!el)return;
+  if(!T.length){el.innerHTML='No data';return;}
+  const minD=T.reduce((m,t)=>t.date<m?t.date:m,T[0].date);
+  const maxD=T.reduce((m,t)=>t.date>m?t.date:m,'');
+  const fmt=d=>{const[y,mo]=d.split('-');return MONTHS_SHORT[+mo-1]+' '+y;};
+  el.innerHTML=fmt(minD)+' – '+fmt(maxD)+'<br>1 account · '+T.length.toLocaleString()+' txns';
+}
+
+function switchUser(name){
+  if(name===activeUser)return;
+  saveState();
+  activeUser=name;
+  const u=USERS[name];
+  T=u.T&&u.T.length?u.T:[];
+  autoSubs=u.autoSubs&&u.autoSubs.length?[...u.autoSubs]:[];
+  subMap={};
+  autoSubs.forEach(s=>{subMap[s.name]={freq:s.freq,amt:s.avg_amt,cat:s.cat};});
+  loadState(name);
+  renderUserSwitcher();
+  updateSidebarMeta();
+  buildPills();
+  go();
+  updateSubCount();
+  renderDashYearSel();
+  setDashYear(activeDashYear);
+}
+
 // ─── INIT ────────────────────────────────────────────────────────────────────
 async function initDashboard(){
   if(SHEET_URL){
@@ -860,6 +911,11 @@ async function initDashboard(){
       }
     }catch(e){ /* network error — use historical data only */ }
   }
+  // Store Tim's inline data into the USERS registry
+  USERS.Tim.T=T;
+  USERS.Tim.autoSubs=autoSubs;
+  renderUserSwitcher();
+  updateSidebarMeta();
   buildPills();
   go();
   updateSubCount();
